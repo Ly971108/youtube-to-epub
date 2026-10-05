@@ -16,11 +16,12 @@ if out.exists() and out.stat().st_size > 1_000_000:
     print(f"SKIP {vid} 已下载 ({out.stat().st_size // 1_000_000} MB)")
     sys.exit(0)
 
-cmd = [sys.executable, "-m", "yt_dlp", "-f", "ba", "--no-playlist",
-       "-o", str(audio_dir / f"{vid}.%(ext)s"),
-       f"https://www.youtube.com/watch?v={vid}"]
+cmd = [sys.executable, "-m", "yt_dlp"]
 if os.environ.get("YT_PROXY"):
-    cmd[4:4] = ["--proxy", os.environ["YT_PROXY"]]
+    cmd += ["--proxy", os.environ["YT_PROXY"]]
+cmd += ["-f", "ba", "--no-playlist",
+        "-o", str(audio_dir / f"{vid}.%(ext)s"),
+        f"https://www.youtube.com/watch?v={vid}"]
 
 for attempt in range(1, 4):
     r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")

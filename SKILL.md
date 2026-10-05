@@ -1,13 +1,20 @@
 ---
-name: youtube-to-epub
-description: Batch-convert YouTube videos, playlists, channels, or lecture series into polished EPUB books. Fetches subtitles when available, otherwise transcribes audio locally with parallel faster-whisper workers, polishes transcripts into book-quality chapters, and builds EPUB volumes with a table of contents. Use when the user wants to 下载YouTube视频文字稿/字幕、把博主视频或课程整理成书/EPUB/小书、批量转写视频、视频转文稿排版、每N篇出一辑. Zero manual setup — dependencies auto-install on first run. Includes a self-improvement loop that grows a misrecognition dictionary and tunes performance after every batch.
+name: youtube-to-book
+description: Turn YouTube content into reading products — two modes selected by user instruction. Mode A (EPUB 小书) - batch-convert videos/playlists/channels/lecture series into polished EPUB books with TOC; subtitles first, local parallel faster-whisper fallback; 5-stage resumable pipeline; volumes every N chapters. Mode B (公众号文章) - single video → Chinese transcript → 《人物》-style WeChat-article HTML (all inline styles, paste-ready for mp.weixin.qq.com). Trigger when user gives a YouTube link and says 整理成书/EPUB/小书/批量转写/每N讲一卷 (Mode A), or 翻译这个视频/搬运/公众号排版/按人物模板排版 (Mode B). Zero manual setup — dependencies auto-install on first run. Self-improving via misrecognition dictionary and per-batch evolution log.
 ---
 
-# YouTube to EPUB
+# YouTube to Book
 
-Turn YouTube content into EPUB books. Proven on a 15-video channel batch and a 205-lecture university course.
+Turn YouTube content into books (Mode A) or WeChat articles (Mode B). Mode A proven on a 15-video channel batch and a 205-lecture university course; Mode B proven on podcast-interview translation (谷爱凌专访《TheBurnouts》).
 
-## First run (mandatory)
+## Mode routing (read user instruction first)
+
+- **Mode A — EPUB 小书**: user wants a book/EPUB, batch processing, playlists/channels/courses, or says 整理成书、做成小书、批量转写、每N讲一卷.
+- **Mode B — 公众号文章**: user wants a single article for WeChat, says 翻译这个视频、搬运、公众号排版、按《人物》模板排版, or already has a manuscript needing only formatting (enter Mode B at step 5).
+- Ambiguous single-video request → ask once which product they want (book vs article).
+- Both modes share the transcript-first principle: try subtitles before any audio transcription.
+
+## First run (mandatory, both modes)
 
 ```bash
 python scripts/bootstrap.py
@@ -15,7 +22,7 @@ python scripts/bootstrap.py
 
 Auto-installs yt-dlp / faster-whisper / imageio-ffmpeg via pip (ffmpeg bundled, no system install). Prints proxy and HuggingFace status. If YouTube is unreachable, set `YT_PROXY=http://127.0.0.1:<port>`; if huggingface.co is unreachable, set `HF_ENDPOINT=https://hf-mirror.com`. Re-run until it prints READY.
 
-## Pipeline (5 stages, all resumable)
+## Mode A — EPUB 小书流水线 (5 stages, all resumable)
 
 Work in a fresh project directory. Run every script from that directory with the skill's `scripts/` path.
 
@@ -25,23 +32,32 @@ Work in a fresh project directory. Run every script from that directory with the
 4. **Polish** each `transcripts/<id>.txt` into a book chapter at `<卷目录>/articles/NN_标题.md`. Follow `references/polishing-guide.md` exactly (format contract, misrecognition fixing via `references/corrections-zh.md`, completeness rules). Long lectures: split the writing across multiple append operations.
 5. **Build**: write `<卷目录>/manifest.json` (`series`, `volume`, optional `creator`), then `python scripts/build_epub.py <卷目录>` → EPUB with TOC, no images. Deliver the file path to the user for preview.
 
-## Batch discipline
-
+**Batch discipline (Mode A)**
 - Default volume size: 5 chapters per EPUB unless the user says otherwise (they may say 每5讲一卷/每10篇一辑).
 - Overlap stages: download/chunk the next batch while the current batch transcribes (transcription is CPU-bound, download is network-bound).
 - Parallelize video downloads (network-bound, 4-6 at once is fine); never exceed 6 whisper workers (CPU-bound, more is slower).
 - After a volume's EPUB is delivered, delete its `audio/` and `chunks/` files; keep `transcripts/` and `articles/`.
 - Track progress in `<project>/progress.json` (`next_index` into `videos.tsv`) so interrupted sessions resume cleanly.
 
-## Failure handling
-
+**Mode A failure handling**
 - YouTube intermittent 403/SABR: retry — scripts already retry 3×; if still failing, wait a minute and re-run. All scripts skip finished work.
 - A killed worker loses only its in-flight chunk; re-run `launch_workers.py` to resume.
 - If a transcript has whole duplicated blocks (whisper loop artifact), note it for the polishing step — dedupe there, do not re-transcribe.
 
+## Mode B — 公众号文章流水线 (6 steps)
+
+Work in `D:\002-AI\AI work\总目录\任务\YYYY-MM-DD_<视频简称>\`. **Full contract lives in `references/wechat-guide.md` — read it before the first Mode B run.** Summary:
+
+1. **Fetch transcript**: `scripts/fetch_transcript.py "<url>" --out <工作目录> --proxy http://127.0.0.1:7897` → `transcript.txt` + `meta.json`. On VideoUnavailable (proxy IP blocked), fall back to `scripts/fetch_via_gh.py` (GitHub Actions relay).
+2. **Classify**: `zh*` language → no translation; 对谈 → dialogue manuscript (`**发言人：**内容`), 独白 → prose.
+3. **Translate**: 意译为主、直译兜底, terms unified in-passing (Eileen Gu→谷爱凌), then a **mandatory full-text final review** before formatting.
+4. **Illustrate (default ON)**: 3~5 subtitle-bearing HD frames + one-line grey captions → `<工作目录>\images\`.
+5. **Format 《人物》-style**: manuscript markdown per `references/模板.md`, then `python scripts/wechat_article.py <文稿.md> [输出.html]` → single-file HTML, images base64-embedded, dialogue/prose paragraph-merging automatic. Verify with headless-browser screenshot.
+6. **Deliver**: absolute path + paste instructions (browser open → Ctrl+A/C → WeChat editor; judge by phone preview).
+
 ## Optional: archive to GitHub
 
-Only after the user approves a preview: push the EPUB (and `articles/` if asked) to the user's archive repo, then delete the local files the user agreed to remove. GitHub repo names are ASCII-only — use a pinyin/English name with a Chinese description.
+Only after the user approves a preview: push the EPUB/article (and `articles/` if asked) to the user's archive repo (`personal-information-source`, private; one folder per book named after the book title, new version replaces old), then delete the local files the user agreed to remove.
 
 ## Self-evolution loop (mandatory — this skill rewrites itself)
 
@@ -62,7 +78,9 @@ Discipline: verify every change (run the touched script on a small sample); neve
 
 ## Reference files (read as needed)
 
-- `references/polishing-guide.md` — book-chapter format contract and polishing rules (read before stage 4)
-- `references/corrections-zh.md` — growing dictionary of whisper misrecognitions for Chinese literary/historical content (load during stage 4; append after each batch)
+- `references/polishing-guide.md` — Mode A book-chapter format contract and polishing rules (read before Mode A stage 4)
+- `references/wechat-guide.md` — Mode B full contract: fetch/translate/illustrate/format/deliver, 《人物》 style table, WeChat-editor pitfalls (read before first Mode B run)
+- `references/模板.md` — Mode B manuscript skeleton
+- `references/corrections-zh.md` — growing dictionary of whisper misrecognitions for Chinese literary/historical content (load during Mode A stage 4; append after each batch)
 - `references/self-improvement.md` — full self-optimization protocol (read after each batch)
 - `references/workflow-notes.md` — battle-tested environment notes: proxy, SABR, timing benchmarks, disk usage
